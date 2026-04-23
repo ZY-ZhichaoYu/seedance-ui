@@ -20,7 +20,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-浏览器访问 http://localhost:8080，在页面顶部填入 API Key 即可使用。
+浏览器访问 http://localhost:8080， 在页面顶部填入 API Key 即可使用。
 
 ## 可选：通过 .env 预配置 API Key
 
