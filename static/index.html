@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seedance UI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f13; color: #e2e2e8; min-height: 100vh; }
+    .container { max-width: 860px; margin: 0 auto; padding: 32px 16px; }
+    h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 24px; color: #fff; }
+    h1 span { color: #7c6fff; }
+    .card { background: #1a1a24; border: 1px solid #2a2a38; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+    label { display: block; font-size: .85rem; color: #aaa; margin-bottom: 6px; }
+    input[type=text], input[type=password], select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #2e2e40; background: #111118; color: #e2e2e8;
+      font-size: .95rem; outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: #7c6fff; }
+    textarea { resize: vertical; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > .field { flex: 1; min-width: 140px; }
+    .field { margin-bottom: 16px; }
+    .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .mode-tab { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid #2e2e40;
+      background: transparent; color: #aaa; cursor: pointer; font-size: .9rem; transition: all .15s; }
+    .mode-tab.active { background: #7c6fff22; border-color: #7c6fff; color: #7c6fff; font-weight: 600; }
+    button.submit { width: 100%; padding: 12px; border-radius: 8px; border: none;
+      background: #7c6fff; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    button.submit:disabled { opacity: .5; cursor: not-allowed; }
+    button.submit:hover:not(:disabled) { opacity: .9; }
+    .tasks-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .tasks-header h2 { font-size: 1.1rem; font-weight: 600; }
+    .task-item { background: #111118; border: 1px solid #2a2a38; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+    .task-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+    .task-prompt { font-size: .9rem; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-model { font-size: .75rem; color: #888; background: #1e1e2a; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+    .badge { font-size: .75rem; font-weight: 600; padding: 2px 10px; border-radius: 99px; white-space: nowrap; }
+    .badge-queued    { background: #2a2a40; color: #aaa; }
+    .badge-running   { background: #1a2a40; color: #60a0ff; }
+    .badge-succeeded { background: #1a3028; color: #4ade80; }
+    .badge-failed    { background: #3a1a1a; color: #f87171; }
+    video { width: 100%; border-radius: 8px; margin-top: 10px; background: #000; }
+    .video-actions { display: flex; gap: 10px; margin-top: 10px; }
+    .btn-dl { display: inline-flex; align-items: center; gap: 6px; padding: 9px 20px;
+      border-radius: 8px; border: none; background: #7c6fff; color: #fff;
+      font-size: .9rem; font-weight: 600; cursor: pointer; text-decoration: none; transition: opacity .15s; }
+    .btn-dl:hover { opacity: .85; }
+    .btn-dl svg { flex-shrink: 0; }
+    .key-hint { font-size: .8rem; color: #4ade80; margin-top: 4px; }
+    details.tips summary { cursor: pointer; font-size: .9rem; color: #7c6fff; padding: 8px 0; user-select: none; }
+    details.tips ul { padding: 12px 16px; color: #bbb; font-size: .88rem; line-height: 1.7; }
+    .hidden { display: none !important; }
+    .empty { text-align: center; color: #555; padding: 32px; font-size: .95rem; }
+    .notice { background: #1a2a18; border: 1px solid #2a4028; border-radius: 8px;
+      padding: 10px 14px; font-size: .85rem; color: #4ade80; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Seedance <span>UI</span></h1>
+
+  <div class="card">
+    <div id="serverKeyNotice" class="notice hidden">
+      API Key 已由服务端配置（.env），无需手动填写。
+    </div>
+
+    <div class="field" id="apiKeyField">
+      <label>API Key
+        <a href="https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey"
+           target="_blank" rel="noopener"
+           style="margin-left:8px;font-size:.78rem;color:#7c6fff;text-decoration:none;">
+          获取 API Key ↗
+        </a>
+      </label>
+      <input type="password" id="apiKey" placeholder="输入 Volcengine Ark API Key" />
+      <div class="key-hint hidden" id="keyHint">已保存到浏览器本地</div>
+    </div>
+
+    <div class="field">
+      <label>模型</label>
+      <select id="model">
+        <option value="doubao-seedance-2-0-260128">doubao-seedance-2-0-260128（Seedance 2.0 标准）</option>
+        <option value="doubao-seedance-2-0-fast-260128">doubao-seedance-2-0-fast-260128（Seedance 2.0 快速）</option>
+        <option value="doubao-seedance-1-5-pro-251215">doubao-seedance-1-5-pro-251215（Seedance 1.5 Pro）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>模式</label>
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="t2v">Text-to-Video</button>
+        <button class="mode-tab" data-mode="i2v">Image-to-Video</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Prompt</label>
+      <textarea id="prompt" rows="4" placeholder="描述你想生成的视频内容…"></textarea>
+    </div>
+
+    <div class="field hidden" id="imageUrlField">
+      <label>Image URL（I2V 模式）</label>
+      <input type="text" id="imageUrl" placeholder="https://…/image.jpg" />
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>时长（秒）</label>
+        <select id="duration">
+          <option value="5">5 秒</option>
+          <option value="10">10 秒</option>
+          <option value="15">15 秒</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>分辨率</label>
+        <select id="resolution">
+          <option value="1280x720">1280×720</option>
+          <option value="1920x1080">1920×1080</option>
+          <option value="960x960">960×960</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="submit" id="submitBtn" onclick="submitTask()">生成视频</button>
+
+    <details class="tips" style="margin-top:16px;">
+      <summary>Prompt 建议</summary>
+      <ul>
+        <li>明确描述镜头运动，如 <em>slow tracking shot</em>、<em>orbital camera</em></li>
+        <li>说明光线氛围，如 <em>golden hour</em>、<em>dark moody atmosphere</em></li>
+        <li>对话内容用双引号：The man said: "Hello."</li>
+        <li>I2V 模式中描述希望图片如何运动（如缓慢推进、视角旋转）</li>
+        <li>Prompt 建议 500 字以内，过长可能影响效果</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="card">
+    <div class="tasks-header">
+      <h2>任务列表</h2>
+      <small style="color:#555;" id="pollStatus"></small>
+    </div>
+    <div id="taskList"><div class="empty">暂无任务</div></div>
+  </div>
+</div>
+
+<script>
+const tasks = [];
+let pollTimer = null;
+let currentMode = 't2v';
+let hasServerKey = false;
+
+// Check server-side API key config
+fetch('/api/config').then(r => r.json()).then(cfg => {
+  hasServerKey = cfg.has_server_key;
+  if (hasServerKey) {
+    document.getElementById('serverKeyNotice').classList.remove('hidden');
+    document.getElementById('apiKeyField').classList.add('hidden');
+  }
+}).catch(() => {});
+
+// Persist API key
+const apiKeyInput = document.getElementById('apiKey');
+const saved = localStorage.getItem('seedance_api_key') || '';
+apiKeyInput.value = saved;
+if (saved) document.getElementById('keyHint').classList.remove('hidden');
+
+apiKeyInput.addEventListener('input', () => {
+  const v = apiKeyInput.value;
+  localStorage.setItem('seedance_api_key', v);
+  document.getElementById('keyHint').classList.toggle('hidden', !v);
+});
+
+// Mode tabs
+document.querySelectorAll('.mode-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = btn.dataset.mode;
+    document.getElementById('imageUrlField').classList.toggle('hidden', currentMode !== 'i2v');
+  });
+});
+
+async function submitTask() {
+  const apiKey = apiKeyInput.value.trim();
+  const model = document.getElementById('model').value;
+  const prompt = document.getElementById('prompt').value.trim();
+  const duration = parseInt(document.getElementById('duration').value);
+  const resolution = document.getElementById('resolution').value;
+  const imageUrl = document.getElementById('imageUrl').value.trim();
+
+  if (!hasServerKey && !apiKey) { alert('请填写 API Key'); return; }
+  if (!prompt) { alert('请填写 Prompt'); return; }
+  if (currentMode === 'i2v' && !imageUrl) { alert('I2V 模式请填写图片 URL'); return; }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '提交中…';
+
+  try {
+    const body = { api_key: apiKey, model, prompt, duration, resolution };
+    if (currentMode === 'i2v') body.image_url = imageUrl;
+
+    const resp = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(err);
+    }
+
+    const data = await resp.json();
+    tasks.unshift({ id: data.task_id, prompt, model, status: 'queued', api_key: apiKey });
+    renderTasks();
+    startPolling();
+  } catch (e) {
+    alert('提交失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成视频';
+  }
+}
+
+const DL_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+function renderTasks() {
+  const list = document.getElementById('taskList');
+  if (tasks.length === 0) {
+    list.innerHTML = '<div class="empty">暂无任务</div>';
+    return;
+  }
+  list.innerHTML = tasks.map(t => {
+    const shortModel = t.model.replace('doubao-seedance-', '').replace('-260128', '').replace('-251215', '');
+    const shortPrompt = t.prompt.length > 50 ? t.prompt.slice(0, 50) + '…' : t.prompt;
+    const badgeClass = {
+      queued: 'badge-queued', running: 'badge-running',
+      succeeded: 'badge-succeeded', failed: 'badge-failed'
+    }[t.status] || 'badge-queued';
+    const statusLabel = {
+      queued: '排队中', running: '生成中', succeeded: '已完成', failed: '失败'
+    }[t.status] || t.status;
+
+    let extra = '';
+    if (t.status === 'succeeded' && t.local_path) {
+      extra = `
+        <video controls src="/api/video/${t.id}" preload="metadata"></video>
+        <div class="video-actions">
+          <a class="btn-dl" href="/api/video/${t.id}" download="${t.id}.mp4">
+            ${DL_ICON} 下载 MP4
+          </a>
+        </div>`;
+    }
+    if (t.status === 'failed' && t.error) {
+      extra = `<div style="color:#f87171;font-size:.85rem;margin-top:6px;">错误：${t.error}</div>`;
+    }
+
+    return `<div class="task-item">
+      <div class="task-meta">
+        <span class="task-prompt" title="${t.prompt}">${shortPrompt}</span>
+        <span class="task-model">${shortModel}</span>
+        <span class="badge ${badgeClass}">${statusLabel}</span>
+      </div>
+      ${extra}
+    </div>`;
+  }).join('');
+}
+
+async function pollTasks() {
+  const pending = tasks.filter(t => t.status !== 'succeeded' && t.status !== 'failed');
+  if (pending.length === 0) {
+    document.getElementById('pollStatus').textContent = '';
+    return;
+  }
+  document.getElementById('pollStatus').textContent = `轮询中（${pending.length} 个进行中）`;
+
+  await Promise.all(pending.map(async t => {
+    try {
+      const params = hasServerKey ? '' : `?api_key=${encodeURIComponent(t.api_key)}`;
+      const resp = await fetch(`/api/status/${t.id}${params}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      t.status = data.status;
+      if (data.local_path) t.local_path = data.local_path;
+      if (data.error) t.error = data.error;
+    } catch (e) { /* ignore */ }
+  }));
+
+  renderTasks();
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollTasks, 5000);
+}
+</script>
+</body>
+</html>
