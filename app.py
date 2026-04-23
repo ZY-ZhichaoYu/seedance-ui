@@ -1,107 +1,160 @@
 import os
-import httpx
-from flask import Flask, request, jsonify, send_from_directory, send_file
-from dotenv import load_dotenv
+import json
+import threading
+import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
+from urllib.parse import urlparse, parse_qs
 
-load_dotenv()
-
-app = Flask(__name__, static_folder="static")
-
+PORT = 8080
 tasks = {}
 
-ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+def load_env():
+    try:
+        with open(".env") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+    except FileNotFoundError:
+        pass
 
+def ark_request(method, path, api_key, body=None):
+    url = f"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks{path}"
+    data = json.dumps(body).encode() if body else None
+    req = Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read())
+    except HTTPError as e:
+        return e.code, json.loads(e.read())
 
-@app.route("/")
-def index():
-    return send_from_directory("static", "index.html")
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass  # suppress default access log
 
+    def send_json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
 
-@app.route("/api/config")
-def config():
-    server_key = os.environ.get("API_KEY", "").strip()
-    return jsonify({"has_server_key": bool(server_key)})
+    def do_GET(self):
+        p = urlparse(self.path)
+        path = p.path
+        qs = parse_qs(p.query)
 
+        if path in ("/", "/index.html"):
+            self._serve_file("static/index.html", "text/html; charset=utf-8")
 
-@app.route("/api/generate", methods=["POST"])
-def generate():
-    data = request.json
-    server_key = os.environ.get("API_KEY", "").strip()
-    api_key = server_key or data.get("api_key", "")
-    model = data.get("model", "")
-    prompt = data.get("prompt", "")
-    duration = int(data.get("duration", 5))
-    resolution = data.get("resolution", "1280x720")
-    image_url = data.get("image_url", "")
+        elif path == "/api/config":
+            has_key = bool(os.environ.get("API_KEY", "").strip())
+            self.send_json(200, {"has_server_key": has_key})
 
-    content = [{"type": "text", "text": prompt}]
-    if image_url:
-        content.append({"type": "image_url", "image_url": {"url": image_url}})
+        elif path.startswith("/api/status/"):
+            task_id = path[len("/api/status/"):]
+            server_key = os.environ.get("API_KEY", "").strip()
+            api_key = server_key or (qs.get("api_key", [""])[0])
+            code, data = ark_request("GET", f"/{task_id}", api_key)
+            if code != 200:
+                self.send_json(code, data)
+                return
+            task_status = data.get("status", "")
+            if task_status == "succeeded":
+                video_url = None
+                for item in data.get("content", []):
+                    if item.get("type") == "video_url":
+                        video_url = item.get("video_url", {}).get("url")
+                        break
+                local_path = None
+                if video_url:
+                    local_path = f"output/{task_id}.mp4"
+                    if not os.path.exists(local_path):
+                        os.makedirs("output", exist_ok=True)
+                        req = Request(video_url)
+                        with urlopen(req, timeout=120) as r:
+                            with open(local_path, "wb") as f:
+                                f.write(r.read())
+                self.send_json(200, {"status": task_status, "local_path": local_path})
+            elif task_status == "failed":
+                error = data.get("error", {}).get("message", "Unknown error")
+                self.send_json(200, {"status": task_status, "error": error})
+            else:
+                self.send_json(200, {"status": task_status})
 
-    payload = {
-        "model": model,
-        "content": content,
-        "parameters": {
-            "resolution": resolution,
-            "duration": duration,
-        },
-    }
+        elif path.startswith("/api/video/"):
+            task_id = path[len("/api/video/"):]
+            file_path = f"output/{task_id}.mp4"
+            if not os.path.exists(file_path):
+                self.send_response(404); self.end_headers(); return
+            with open(file_path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", len(data))
+            self.send_header("Content-Disposition", f'attachment; filename="{task_id}.mp4"')
+            self.end_headers()
+            self.wfile.write(data)
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        else:
+            self.send_response(404); self.end_headers()
 
-    resp = httpx.post(ARK_BASE, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    result = resp.json()
+    def do_POST(self):
+        if self.path == "/api/generate":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            server_key = os.environ.get("API_KEY", "").strip()
+            api_key = server_key or body.get("api_key", "")
+            payload = {
+                "model": body["model"],
+                "content": [{"type": "text", "text": body["prompt"]}],
+                "parameters": {
+                    "resolution": body.get("resolution", "1280x720"),
+                    "duration": int(body.get("duration", 5)),
+                },
+            }
+            if body.get("image_url"):
+                payload["content"].append(
+                    {"type": "image_url", "image_url": {"url": body["image_url"]}}
+                )
+            code, data = ark_request("POST", "", api_key, payload)
+            if code != 200:
+                self.send_json(code, data)
+                return
+            task_id = data.get("id") or data.get("task_id")
+            tasks[task_id] = {"prompt": body["prompt"], "model": body["model"]}
+            self.send_json(200, {"task_id": task_id})
+        else:
+            self.send_response(404); self.end_headers()
 
-    task_id = result.get("id") or result.get("task_id")
-    tasks[task_id] = {"prompt": prompt, "model": model}
-    return jsonify({"task_id": task_id})
-
-
-@app.route("/api/status/<task_id>")
-def status(task_id):
-    server_key = os.environ.get("API_KEY", "").strip()
-    api_key = server_key or request.args.get("api_key", "")
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-    resp = httpx.get(f"{ARK_BASE}/{task_id}", headers=headers, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-
-    task_status = data.get("status", "")
-
-    if task_status == "succeeded":
-        video_url = None
-        content = data.get("content", [])
-        for item in content:
-            if item.get("type") == "video_url":
-                video_url = item.get("video_url", {}).get("url")
-                break
-
-        local_path = None
-        if video_url:
-            local_path = f"output/{task_id}.mp4"
-            if not os.path.exists(local_path):
-                video_resp = httpx.get(video_url, timeout=120, follow_redirects=True)
-                video_resp.raise_for_status()
-                os.makedirs("output", exist_ok=True)
-                with open(local_path, "wb") as f:
-                    f.write(video_resp.content)
-
-        return jsonify({"status": task_status, "local_path": local_path})
-
-    if task_status == "failed":
-        error = data.get("error", {}).get("message", "Unknown error")
-        return jsonify({"status": task_status, "error": error})
-
-    return jsonify({"status": task_status})
-
-
-@app.route("/api/video/<task_id>")
-def video(task_id):
-    path = f"output/{task_id}.mp4"
-    return send_file(path, mimetype="video/mp4")
+    def _serve_file(self, file_path, content_type):
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
+        except FileNotFoundError:
+            self.send_response(404); self.end_headers()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    load_env()
+    os.makedirs("output", exist_ok=True)
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    url = f"http://localhost:{PORT}"
+    print(f"Seedance UI 已启动：{url}")
+    print("关闭此窗口即可停止服务。")
+    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止。")

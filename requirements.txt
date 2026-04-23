@@ -1,3 +1,2 @@
-flask
-httpx
-python-dotenv
+# 无需安装任何依赖，Python 3.8+ 标准库即可运行
+# This project uses only Python standard library. No pip install needed.
